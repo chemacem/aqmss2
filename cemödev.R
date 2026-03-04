@@ -2,10 +2,6 @@
 # Assignment 4 – Wealth and Infant Mortality
 ############################################################
 
-############################
-# Setup
-############################
-
 pkgs <- c("haven", "dplyr", "ggplot2",
           "modelsummary", "marginaleffects", "sandwich")
 
