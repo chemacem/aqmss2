@@ -44,7 +44,7 @@ n_countries <- nrow(df)
 print(n_countries)
 
 # COMMENT (2.1a):
-# The dataset contains n_countries countries (observations), as shown in the printed output above.
+# The dataset contains n_countries countries.
 
 # Histograms
 p1 <- ggplot(df, aes(infant)) +
@@ -65,9 +65,7 @@ save_plot("2_1b_hist_income.png", p2)
 
 # COMMENT (2.1b):
 # Both variables are right-skewed. Most countries have relatively low infant mortality
-# and low-to-moderate income levels, while a small number of observations appear at
-# very high values (e.g., extremely high infant mortality or very high income),
-# creating a long right tail in both distributions.
+# and low-to-moderate income levels, while a small number of observations appear at very high values.
 
 # Scatter level
 p3 <- ggplot(df, aes(income, infant, color=region)) +
@@ -80,10 +78,10 @@ print(p3)
 save_plot("2_1c_scatter_levels.png", p3)
 
 # COMMENT (2.1c):
-# The scatter plot shows a strong negative relationship between income and infant mortality.
+# The scatter plot shows us strong negative relationship between income and infant mortality.
 # Countries with higher income levels tend to have substantially lower infant mortality rates.
-# African countries are clustered at lower income levels with higher mortality,
-# while European countries appear at higher income levels with much lower mortality.
+# Africans are clustered at lower income levels with higher mortality,
+# while european countries appears at higher income levels with much lower mortality.
 
 # Scatter log-log
 p4 <- ggplot(df, aes(log(income), log(infant), color=region)) +
@@ -99,7 +97,7 @@ save_plot("2_1d_scatter_loglog.png", p4)
 # The log-log transformation makes the relationship more linear.
 # The negative relationship between income and infant mortality becomes clearer,
 # and the spread of observations is more evenly distributed across the plot,
-# suggesting the log-log specification may be more appropriate for modeling.
+# suggesting the log and log specification may be more appropriate for modeling.
 
 ############################
 # 2.2 Comparing specifications
@@ -117,17 +115,15 @@ print(effect_1000)
 
 # COMMENT (2.2c – m1):
 # In the level-level model, a $1,000 increase in income is associated with
-# a change of effect_1000 in infant mortality (per 1,000 live births),
-# based on the coefficient printed above.
+# a change of effect_1000 in infant mortality, based on the coefficient.
 
 b2 <- coef(m2)["log(income)"]
 print(b2)
 
 # COMMENT (2.2c – m2):
 # The coefficient on log(income) represents an elasticity.
-# A 10% increase in income is associated with approximately (10*b2)% change
-# in infant mortality. The negative coefficient indicates that higher income
-# is associated with lower infant mortality.
+# A ten percent increase in income is associated with approximately (10*b2)% changes.
+# in infant mortality. The negative coefficient indicates that higher income is associated with lower infant mortality.
 
 # Residual plots
 p_r1 <- ggplot(data.frame(f=fitted(m1), r=resid(m1)),
@@ -146,7 +142,7 @@ save_plot("2_2d_resid_m2.png", p_r2)
 
 # COMMENT (2.2d):
 # The residual plot for the level-level model shows greater curvature and
-# heteroskedasticity, while the log-log model displays a more random scatter
+# heteroskedastisity while the log-log model displays a more random scatter
 # of residuals around zero. This suggests the log-log specification provides
 # a better functional form for the relationship.
 
@@ -167,21 +163,18 @@ b3 <- coef(m3)["log(income)"]
 print(b3)
 
 # COMMENT (2.3b):
-# After controlling for region and oil-exporting status, the coefficient on
-# log(income) remains negative, indicating that higher income continues to be
-# associated with lower infant mortality. The magnitude of the coefficient
-# represents the income elasticity of infant mortality after accounting
-# for regional differences.
+# After controlling for region and oil exporting status, the coefficient on
+# log(income) remains negative, indicating that higher income continues to
+# associated with lower infant mortality. The effect of the coefficient
+# represents the income elasticity of infant mortality after accounting  for regional differences.
 
 if("regionAfrica" %in% names(coef(m3))){
   africa_pct <- (exp(coef(m3)["regionAfrica"])-1)*100
   print(africa_pct)
   # COMMENT (2.3c):
-  # The coefficient for Africa indicates that, holding income and oil status constant,
+  # The coefficient for africa indicates that, holding income and oil status constant,
   # African countries have substantially higher infant mortality compared to the
-  # reference region (Europe). This suggests that regional structural factors,
-  # such as healthcare systems or infrastructure, also influence infant mortality.
-}
+  # reference region such as Europe.
 
 ame_m3 <- avg_slopes(m3, variables="income")
 print(ame_m3)
@@ -200,7 +193,7 @@ print(me_by_oil)
 # The marginal effects indicate that the relationship between income and infant
 # mortality differs between oil-exporting and non-oil countries. In oil-exporting
 # countries, increases in income may have a weaker or different effect on reducing
-# infant mortality compared to non-oil countries. This could reflect differences
+# infant mortality compared to non-oil countries. This reflects differences
 # in how resource wealth translates into public health improvements.
 
 # REQUIRED: plot_slopes()
@@ -236,10 +229,8 @@ gap <- pred$infant_hat[1] - pred$infant_hat[2]
 print(gap)
 
 # COMMENT (2.5b):
-# The predicted infant mortality for a low-income African country is much higher
-# than for a high-income European country. The difference (gap) printed above
-# illustrates the large disparity in infant mortality outcomes between regions,
-# even when using the model predictions.
+# Predicted infant mortality for a low-income African country is much higher
+# than for a high-income European country.
 
 ############################
 # 2.6 Publication-quality visualization
@@ -260,17 +251,14 @@ print(p_final)
 save_plot("2_6_prediction_plot.png", p_final,8,5)
 
 # COMMENT (2.6b):
-# The prediction plot shows a clear negative relationship between income and infant mortality:
+# The prediction plot shows a clear negative relationship between income and infant mortality
 # as countries become wealthier, predicted infant mortality declines. The decline is steepest
-# at low income levels and flattens as income rises, suggesting diminishing returns to income
-# in improving infant survival. Geography matters strongly: Africa has consistently higher
+# at low income levels and flattens as income rises, which means diminishing returns to income
+# in improving infant survival. Africa has always consistently higher
 # predicted mortality than other regions across the income range, while Europe remains the lowest.
 # The Americas and Asia lie in between, indicating persistent regional differences beyond income.
-# This pattern likely reflects differences in health infrastructure, disease environments, public
-# health capacity, and broader institutions that vary by region. Important limitations include
-# omitted variables (e.g., sanitation, vaccination, maternal education, inequality, governance),
-# potential reverse causality (health improvements may also raise income), and the ecological
-# nature of country-level data (relationships may not hold at the individual level).
+# This pattern likely reflects differences in infrastructure, environments, public
+# health etc.
 
 ############################
 # 2.7 Robust inference
@@ -306,8 +294,7 @@ modelsummary(list("Robust SE"=m3), vcov="robust")
 # COMMENT (2.7):
 # Robust standard errors adjust for potential heteroskedasticity in the data.
 # While the coefficient estimates remain the same, the standard errors may
-# change, which can affect statistical significance. Using robust standard
-# errors ensures that inference is valid even if the variance of residuals
-# is not constant across observations.
+# change Using robust standard errors ensures that inference is valid even if the variance of residuals
+# is not constant among observations.
 ############################################################
 
