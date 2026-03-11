@@ -1,0 +1,83 @@
+
+################################################################################
+#Library
+
+library(dplyr)
+library(ggplot2)
+library(fixest)
+library(modelsummary)
+library(haven)
+library(fixest)
+library(plm)
+
+################################################################################
+#2 Part 2: Teaching Evaluations
+
+df <- read_dta(teaching_evals)
+
+#2.1 Data exploration
+
+#a)
+n_distinct(df$InstrID)
+#48
+
+n_distinct(df$CourseID)
+#254
+
+avg_obs_per_instructor <- df %>%
+  count(InstrID) %>%
+  summarise(avg_obs = mean(n)) %>%
+  pull(avg_obs)
+avg_obs_per_instructor
+# 17.52083
+
+#b)
+ggplot(df, aes(x = Apct, y = Eval)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    x = "Percent receiving A or A-",
+    y = "Average course evaluation",
+    title = "Teaching evaluations and grading generosity"
+  ) +
+  theme_minimal()
+
+#2.2 Pooled OLS baseline
+
+#a)
+m1 = lm(Eval ~ Apct + Enrollment + Required, data = df)
+summary(m1)
+#The average teaching assessment increases by 0.359 points for every unit increase in Apct, according to the coefficient on Apct, which is 0.359.
+
+#b)
+#More students may perform well and teachers who effectively engage pupils and give excellent explanations of the material may receive higher evaluations.
+#Some instructors may design more straightforward courses or administer grades more deftly, which could increase the proportion of A grades and students' contentment with the course.
+#Since these unobserved characteristics are probably positively correlated with Apct, the estimate is most certainly skewed upward.
+
+#2.3 Fixed effects models
+
+#a)
+m_instr = feols(Eval ~ Apct + Enrollment + Required | InstrID, data = df)
+summary(m_instr)
+m_twfe = feols(Eval ~ Apct + Enrollment + Required | InstrID + Year, data = df)
+summary(m_twfe)
+
+#b)
+modelsummary(
+  list("Pooled OLS" = m1, "Instructor FE" = m_instr, "Two-Way FE" = m_twfe),
+  vcov = ~InstrID,
+  stars = TRUE,
+  gof_map = c("r.squared", "nobs"))
+
+
+#2.4 Random effects and the Hausman test
+
+pdata = pdata.frame(df, index = c("InstrID", "CourseID"))
+m_re = plm(Eval ~ Apct + Enrollment + Required,
+           data = pdata, model = "random")
+
+m_fe_plm = plm(Eval ~ Apct + Enrollment + Required,
+               data = pdata, model = "within")
+phtest(m_fe_plm, m_re)
+
+#The Hausman test's null hypothesis states that there is no correlation between the regressors and the unobserved instructor-level attributes.Since the p-value is more than 0.05, the null hypothesis is not rejected. This implies that the random effects estimator is consistent and that the random effects assumption might be realistic. Nonetheless, it is still conceivable that teacher traits like teaching aptitude or grading style have an impact on evaluation and grading scores based on the substantive rationale from the preceding section. Because it more effectively accounts for unobserved instructor traits, the fixed effects approach is likely superior overall.
