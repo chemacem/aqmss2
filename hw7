@@ -1,0 +1,241 @@
+library(sf)
+library(spData)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(maps)
+
+data(world)
+class(world)
+names(world)
+nrow(world)
+st_crs(world)
+st_geometry_type(world)
+unique(st_geometry_type(world))
+#pdf("world_gdp_base.pdf")
+plot(world["gdpPercap"])
+#dev.off()
+world_no_ant <- world %>%
+filter(name_long != "Antarctica")
+plot(world_no_ant["gdpPercap"])
+westernasia <- filter(world, subregion == "Western Asia")
+nrow(westernasia)
+plot(westernasia["gdpPercap"], main = "GDP per capita — Western Asia")
+ggplot(world) + geom_sf(aes(fill = gdpPercap)) + scale_fill_viridis_c(option = "plasma", na.value = "grey80", name = "GDP per capita") + theme_void() + labs(title = "GDP per capita by country")
+ggsave("world_gdp.pdf", width = 10, height = 5)
+ggsave("westernasia_gdp_borders.pdf", width = 7, height = 6)
+
+ggplot(africa) +
+  geom_sf(aes(fill = gdpPercap)) +
+  scale_fill_viridis_c(
+    option = "magma",
+    na.value = "grey80",
+    name = "GDP per capita"
+  ) +
+  theme_void() +
+  labs(title = "GDP per capita -- Africa")
+
+ggplot(world) +
+  geom_sf(aes(fill = gdpPercap)) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    na.value = "grey80",
+    name = "GDP per capita"
+  ) +
+  theme_void() +
+  labs(title = "GDP per capita by country")
+
+ggsave("world_gdp.pdf", width = 10, height = 5)
+
+world <- world %>%
+  mutate(pop_millions = pop / 1e6)
+
+gdp_by_continent <- world %>%
+  group_by(continent) %>%
+  summarise(mean_gdpPercap = mean(gdpPercap, na.rm = TRUE))
+
+print(st_drop_geometry(gdp_by_continent))
+
+ggplot(africa) +
+  geom_sf(aes(fill = gdpPercap), color = "white", linewidth = 0.3) +
+  scale_fill_viridis_c(
+    option = "magma",
+    na.value = "grey80",
+    name = "GDP per capita"
+  ) +
+  theme_void() +
+  labs(title = "GDP per capita -- Africa (with borders)")
+
+ggsave("africa_gdp_borders.pdf", width = 7, height = 6)
+
+################################################################################
+# PART 2: TAKE-HOME
+
+library(sf)
+library(spData)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+data(world)
+
+events <- read.csv("~/Downloads/conflict_events.csv")
+
+# 2.1 
+
+events_sf <- st_as_sf(
+  events,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+class(events_sf)
+st_crs(events_sf)
+
+nrow(events_sf)
+table(events_sf$event_type)
+
+# The dataset contains 68,354 events in total. Based on the frequency table,
+# one-sided violence is the most common event type, followed with non-state and
+# then state-based events.
+
+conflict_event_map <- ggplot() +
+  geom_sf(data = world, fill = "grey85", color = "grey65", linewidth = 0.15) +
+  geom_sf(data = events_sf, aes(color = event_type), size = 0.5, alpha = 0.65) +
+  theme_void() +
+  labs(
+    title = "Conflict Events Overlaid on World Map",
+    color = "Event type"
+  )
+
+conflict_event_map
+
+ggsave("conflict_events_world_map.pdf", width = 11, height = 6)
+
+# Conflict events are highly concentrated rather than evenly distributed across
+# the world. The densest clusters appear in Sub-Saharan Africa, especially in
+# Central, Eastern, and parts of Western Africa, with relatively few events
+# outside Africa in this dataset. The three event types overlap geographically,
+# which suggests that multiple forms of organized violence coexist in many of
+# the same regions.
+
+# 2.2 Spatial join
+
+st_crs(world)
+st_crs(events_sf)
+
+events_joined <- st_join(events_sf, world)
+
+nrow(events_joined)
+nrow(events_sf)
+
+# st_join() assigns country-level attributes from the polygon layer to each
+# event point based on spatial location. In practice, it checks which country
+# polygon contains each point and then attaches variables such as name_long,
+# continent, and gdpPercap to that event. It is important to verify that both
+# objects use the same CRS before joining, because mismatched coordinate systems
+# can lead to incorrect or failed spatial matches.
+
+sum(is.na(events_joined$name_long))
+sum(is.na(events_joined$name_long)) / nrow(events_joined)
+
+# A small fraction of events has no matching country polygon. This can happen
+# because some events fall at sea or coastlines, or because some points
+# lie exactly on borders or slightly outside a polygon due to coordinate
+# imprecision.
+
+country_conflict_summary <- events_joined %>%
+  filter(!is.na(name_long)) %>%
+  group_by(name_long) %>%
+  summarise(
+    n_events = n(),
+    total_fatalities = sum(fatalities, na.rm = TRUE)
+  ) %>%
+  arrange(desc(n_events))
+
+country_conflict_summary %>%
+  st_drop_geometry() %>%
+  head(10)
+
+# The country-level results are broadly consistent with contemporary armed
+# conflict patterns. The Democratic Republic of the Congo, Nigeria, Somalia,
+# and Ethiopia appear among the countries with the highest numbers of recorded
+# events, which is substantively plausible given recent and long-running
+# conflicts in these regions. The fatalities column also highlights that event
+# frequency and lethality do not always move together perfectly, since some
+# countries with fewer events may still have extremely high death tolls.
+
+# 2.3 Choropleth
+
+country_conflict_df <- country_conflict_summary %>%
+  st_drop_geometry()
+
+world_conflict <- world %>%
+  left_join(country_conflict_df, by = "name_long") %>%
+  mutate(
+    n_events = replace_na(n_events, 0),
+    total_fatalities = replace_na(total_fatalities, 0)
+  )
+
+nrow(world_conflict)
+nrow(world)
+
+# Joining the country-level event counts back to the world polygons make it
+# possible to visualize conflict intensity at the country level.
+
+conflict_count_map <- ggplot(world_conflict) +
+  geom_sf(aes(fill = n_events), color = "white", linewidth = 0.1) +
+  scale_fill_distiller(
+    palette = "Reds",
+    direction = 1,
+    name = "Events"
+  ) +
+  theme_void() +
+  labs(title = "Conflict Event Counts by Country")
+
+conflict_count_map
+
+ggsave("conflict_count_map.pdf", width = 11, height = 6)
+
+# The raw count map shows that conflict events are heavily concentrated in a
+# smaller number of countries. The Democratic Republic of the Congo is
+# the clearest standout, while Nigeria, Somalia, Ethiopia, Sudan, and Algeria
+# also part among the higher-count cases. This geographic pattern is broadly
+# consistent with the event level map, but country-level aggregation makes it
+# easier to compare overall conflict intensity across national territories.
+
+conflict_log_map <- ggplot(world_conflict) +
+  geom_sf(aes(fill = log1p(n_events)), color = "white", linewidth = 0.1) +
+  scale_fill_distiller(
+    palette = "YlOrRd",
+    direction = 1,
+    name = "Log(events+1)"
+  ) +
+  theme_void() +
+  labs(title = "Log-Transformed Conflict Event Counts by Country")
+
+conflict_log_map
+
+ggsave("conflict_log_map.pdf", width = 11, height = 6)
+
+# The log transformation is useful because conflict event counts are highly
+# skewed: a few countries have extremely large values, while many others have
+# much lower counts. In the raw map, the highest count countries dominate the
+# visual scale, but the log transformed map reveals more variation across a
+# wider range of African countries, with those with low and moderate levels
+# of conflict. This gives a fuller picture of the broader regional distribution
+# of violence.
+
+# 2.5 
+
+# One limitation of the spatial join approach is that points falling exactly on
+# borders may be assigned ambiguously or fail to match any polygon at all.
+# Likewise, small coordinate errors may place an event just outside the correct
+# country boundary, so one possible solution would be to use a small buffer or
+# a nearest feature method for unmatched points.
+
+# st_join() matches observations using spatial relationships, such as whether a
+# point lies inside a polygon, while left_join() matches rows using a shared
+# attribute key such as country name. I would use st_join() when the match is
+# geographic, and left_join() when both data sets already share a common
+# identifier.
