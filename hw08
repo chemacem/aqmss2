@@ -1,0 +1,241 @@
+
+##Author: Senihcem Gezgin
+##Assignment 8
+
+################################################################################
+library(sf)
+library(spData)
+library(parameters)
+library(spatialreg)
+library(spdep)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(modelsummary)
+################################################################################
+
+#1 Part 1: In-Class
+
+data(world)
+
+#1.1 Setup and OLS baseline
+
+#a)
+world = world[!is.na(world$gdpPercap) & !is.na(world$lifeExp), ]
+world = world[world$continent != "Antarctica", ]
+world$log_gdp = log(world$gdpPercap)
+nrow(world)
+
+#160 countries
+#Taking the logarithm of GDP per capita because the original variable is highly right-skewed,
+#with a small number of very wealthy countries having much larger values than most others.
+#Logging reduces the influence of these extreme values and helps produce a more linear
+#relationship between GDP per capita and life expectancy, which makes OLS more appropriate.
+
+#b)
+ols_fit = lm(lifeExp ~ log_gdp, data = world)
+summary(ols_fit)
+
+#The coefficient on log_gdp is positive and statistically significant p < 0.001,
+#indicating that countries with higher GDP per capita tend to have higher life expectancy.
+#A one-unit increase in log GDP per capita is associated with an increase in life expectancy
+#by the estimated number of years, on average. The R-squared shows that the model explains
+#a meaningful share of the variation in life expectancy across countries.
+
+#c)
+world$ols_resid = residuals(ols_fit)
+ggplot(world) +
+  geom_sf(aes(fill = ols_resid), color = "pink", linewidth = 0.2) +
+  scale_fill_gradient2(low = "#2166ac", mid = "white", high = "#d6604d",
+                       midpoint = 0, name = "OLS residual") +
+  theme_void() +
+  labs(title = "OLS residuals: life expectancy ~ log GDP per capita")
+ggsave("ols_residuals_map.pdf", width = 10, height = 5)
+
+#The residual map shows a clear geographic pattern. Many countries in Sub-Saharan
+#Africa have negative (HIV/AIDS) residuals, which means their observed life expectancy is lower
+#than predicted by income alone. By contrast, Western Europe and parts of East Asia
+#have positive residuals, indicating higher life expectancy than the model predicts.
+#This clustering suggests that the residuals are not randomly distributed and points
+#to possible spatial autocorrelation.
+
+#1.2 Spatial weights matrix
+
+#a)
+nb = poly2nb(world, queen = TRUE)
+listw = nb2listw(nb, style = "W", zero.policy = TRUE)
+summary(nb)
+
+#There are 16 countries with zero neighbors. Most of them are islands, so they do
+#not share any border or boundary point with other countries in the dataset. In a
+#queen contiguity structure, neighbors must touch at least at one point. Since these
+#countries are geographically separated by water, they end up with no neighbors and
+#are recorded as isolated observations in the spatial weights matrix. The option
+#zero.policy = TRUE makes it possible to retain them in the analysis.
+
+#b)
+moran.test(world$ols_resid, listw = listw, zero.policy = TRUE)
+
+#The Moran's I statistic is positive and statistically significant, which indicates
+#positive spatial autocorrelation in the OLS residuals. In other words, nearby countries
+#tend to have similar residual values, whether positive or negative. This suggests that
+#the residuals are not independently distributed across space, violating a key OLS
+#assumption and implying that standard OLS inference may be unreliable.
+
+#1.3 Lagrange Multiplier tests
+
+#a)
+lm_tests = lm.LMtests(ols_fit, listw = listw,
+                      test = c("LMerr", "LMlag", "RLMerr", "RLMlag"),
+                      zero.policy = TRUE)
+summary(lm_tests)
+
+#LMerr tests for spatial dependence in the error term, as modeled in the SEM,
+#while LMlag tests whether a spatially lagged dependent variable should be included,
+#as in the SLM. Since both tests are statistically significant, each points to some
+#form of spatial dependence when considered on its own. When this happens, the robust
+#LM tests are used to determine which specification is more appropriate.
+
+#b)
+#The robust LM tests account for the possibility that the other form of spatial
+#dependence is also present. If RLMerr is more statistically significant than RLMlag,
+#the SEM is preferred; if RLMlag is more significant, the SLM is favored. Following
+#this decision rule, the results above indicate which of the two spatial models is
+#more appropriate for the next step of the analysis.
+
+
+#1.4 Spatial Error Model 
+
+#a)
+sem_fit = errorsarlm(lifeExp ~ log_gdp, data = world,
+                     listw = listw, zero.policy = TRUE)
+summary(sem_fit)
+
+#The coefficient on log_gdp in the SEM can differ somewhat from the OLS estimate
+#because the model accounts for spatial dependence in the error term. The lambda
+#parameter captures the extent of spatial autocorrelation in the residuals. If lambda
+#is positive and statistically significant, this indicates that the unexplained part
+#of life expectancy remains spatially clustered across countries.
+
+#b)
+#In the SEM, lambda describes the spatial dependence in the error term: u = lambda*Wu + e.
+#A positive and statistically significant lambda suggests that unobserved factors affecting
+#life expectancy are geographically clustered across countries. In other words, some omitted
+#influences are spatially correlated. The SEM accounts for this pattern in the residuals
+#without assuming that life expectancy itself directly spreads across neighboring countries.
+
+#c)
+world$sem_resid = residuals(sem_fit)
+moran.test(world$sem_resid, listw = listw, zero.policy = TRUE)
+
+#Compared with the Moran's I result from the OLS residuals, the SEM residuals show
+#much weaker spatial autocorrelation. The statistic is now closer to zero and the
+#p-value is no longer significant, or is at least much smaller in magnitude. This
+#suggests that the SEM has successfully captured most of the spatial dependence that
+#remained in the OLS residuals.
+
+#1.5 Distance-based weights: an alternative neighborhood
+
+#a)
+coords = st_centroid(st_geometry(world))
+nb_dist = dnearneigh(coords, d1 = 0, d2 = 300)
+summary(nb_dist)
+
+#There are 114 countries with zero neighbors, much more than under queen contiguity.
+#The main reason is that a 300 km cutoff is too small for a global country-level dataset,
+#so many country centroids fall outside this range from all others.
+
+#b)
+listw_dist = nb2listw(nb_dist, style = "W", zero.policy = TRUE)
+sem_dist = errorsarlm(lifeExp ~ log_gdp, data = world,
+                      listw = listw_dist, zero.policy = TRUE)
+summary(sem_dist)
+
+#c)
+world$sem_dist_resid = residuals(sem_dist)
+
+moran.test(world$sem_dist_resid,
+           listw = listw_dist,
+           zero.policy = TRUE)
+
+
+#2 Part 2: Take-Home 
+
+#2.1 Spatial Lag Model
+
+#a)
+slm_fit = lagsarlm(lifeExp ~ log_gdp,
+                   data = world,
+                   listw = listw,
+                   zero.policy = TRUE)
+
+summary(slm_fit)
+
+#The estimated rho is -0.0043 and is not statistically significant (p = 0.806),
+#which suggests that spatial dependence is not important in this model.
+#Meanwhile, log_gdp has a coefficient of 5.55 and is highly statistically significant
+#(p < 0.001), showing a strong positive relationship with the dependent variable.
+
+#b)
+#The parameter rho measures the extent to which life expectancy in one country is
+#associated with life expectancy in border countries. Here, rho is very close
+#to zero and not statistically significant, providing little evidence of meaningful
+#spatial dependence in the dependent variable.
+
+#c)
+#In the SLM, the coefficient on log GDP per capita is not interpreted as a simple
+#marginal effect. This is because a change in GDP per capita in one country can affect
+#its own life expectancy and also influence neighboring countries through spatial
+#feedback effects.
+
+#2.2 Direct and Indirect Effect
+
+#a)
+set.seed(123)
+
+imp = impacts(slm_fit, listw = listw, R = 500)
+summary(imp)
+
+#The direct effect is 5.55, the indirect effect is -0.02,
+#and the total effect is 5.52. The direct effect is nearly identical to the
+#estimated coefficient on log GDP per capita in the SLM and is also very close
+#to the corresponding OLS estimate.
+
+#b)
+#The indirect effect captures how a change in GDP per capita in one country affects
+#life expectancy in other countries through spatial spillovers. Here, the indirect
+#effect is very small and statistically insignificant, suggesting that changes in
+#GDP per capita in one country have little effect on life expectancy in neighboring countries.
+
+#c)
+#The total effect is the sum of the direct and indirect effects. In this case, it
+#is very close to the direct effect because the indirect effect is close to zero.
+#This indicates that spatial spillover effects are negligible in the SLM.
+
+#2.3 Model Comparison
+
+#a)
+#The AIC for the OLS model is 965.99, while the AIC for the SLM is 967.93.
+#The SEM has the lowest AIC among the models, indicating the best fit after
+#taking model complexity into account.
+
+#2.4 Extension: Spatial Durbin Model
+
+#a)
+sdm_fit = lagsarlm(lifeExp ~ log_gdp,
+                   data = world,
+                   listw = listw,
+                   Durbin = TRUE,
+                   zero.policy = TRUE)
+
+summary(sdm_fit)
+#The coefficient on lag.log_gdp is negative (-3.83) and highly statistically
+#significant (p < 0.001). This suggests that, holding a country's own GDP constant,
+#higher GDP per capita in neighboring countries is linked to lower life expectancy
+#in that country, although this result should be treated carefully given the spatial
+#structure of the model.
+
+#b)
+#With an AIC of 939.83, the SDM outperforms both the SLM (967.93) and OLS (965.99).
+#This means it offers a better overall fit to the data despite being a more complex model.
