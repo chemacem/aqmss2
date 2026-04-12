@@ -1,0 +1,259 @@
+library(dplyr)
+library(broom)
+library(ggplot2)
+library(modelsummary)
+library(sandwich)
+
+##QoG Dataset
+
+## 1. Preparation
+
+# a)
+qog = read.csv("https://www.qogdata.pol.gu.se/data/qog_std_cs_jan26.csv")
+df = qog %>%
+  select(country = cname, epi = epi_epi, women_parl = wdi_wip,
+         gov_eff = wbgi_gee, green_seats = cpds_lg)
+# b)
+nrow(df)
+
+# c)
+summary(df)
+
+## 1.2 Visualization
+
+# a) & b) 
+ggplot(df, aes(x = women_parl, y = epi)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(x = "Women in Parliament (%)", y = "EPI Score")
+
+#c)
+#The plot suggests positive relationship, indicating that countries with a higher share of women in parliament tend to have higher EPI scores on average.
+
+##3. Bivariate Regression
+
+# a)
+m1 = lm(epi ~ women_parl, data = df)
+
+# b)
+tidy(m1)
+
+# c)
+p25 = quantile(df$women_parl, 0.25, na.rm = TRUE)
+p75 = quantile(df$women_parl, 0.75, na.rm = TRUE)
+
+coef(m1)["women_parl"] * (p75 - p25)
+
+## 1.4 Multiple Regression
+
+#a)
+m2 = lm(epi ~ women_parl + gov_eff, data = df)
+tidy(m2)
+
+#b) 
+#The coefficient for women_parl becomes smaller in multiple regression.
+#This is likely because gov_eff and women_parl are correlated.
+
+## 1.5 Demonstrating OVB
+
+# a)
+beta1_biva = tidy(m1) %>% filter(term == "women_parl") %>% pull(estimate)
+beta1_mult = tidy(m2) %>% filter(term == "women_parl") %>% pull(estimate)
+beta2_mult = tidy(m2) %>% filter(term == "gov_eff") %>% pull(estimate)
+
+# b)
+aux = lm(gov_eff ~ women_parl, data = df)
+delta = tidy(aux) %>% filter(term == "women_parl") %>% pull(estimate)
+
+# c)
+round(beta1_mult + beta2_mult * delta, 4)
+
+round(beta1_biva, 4)
+
+# d)
+#gov_eff is correlated with women_parl.
+
+##1.6 Robust standard errors
+
+# a)
+modelsummary(m2, output = "markdown")
+
+# b)
+modelsummary(m2, vcov = "robust", output = "markdown")
+
+# c)
+#The standard errors are similar thus the overall conclusion remains unchanged.
+
+## 1.7 Presenting results
+
+#a)
+modelsummary(list("Bivariate" = m1, "Multiple" = m2),
+             vcov = "robust", output = "markdown")
+
+#b)
+modelplot(list("Bivariate" = m1, "Multiple" = m2),
+          vcov = "robust")
+
+
+# 2. STAR 
+
+## 2.1 Preparation
+
+library(readr)
+star <- read_csv("~/Downloads/star.csv")
+
+star <- star %>%
+  mutate(
+    classtype_f = case_when(
+      classtype == 1 ~ "Small",
+      classtype == 2 ~ "Regular",
+      classtype == 3 ~ "Regular+Aide",
+      TRUE ~ NA_character_
+    ),
+    classtype_f = factor(classtype_f,
+                         levels = c("Small", "Regular", "Regular+Aide")),
+    race_f = case_when(
+      race == 1 ~ "White",
+      race == 2 ~ "Black",
+      race == 3 ~ "Asian",
+      race == 4 ~ "Hispanic",
+      race == 5 ~ "Native American",
+      race == 6 ~ "Other",
+      TRUE ~ NA_character_
+    ),
+    race_f = factor(race_f,
+                    levels = c("White", "Black", "Asian", "Hispanic", "Native American", "Other")),
+    small = case_when(
+      classtype_f == "Small" ~ 1,
+      is.na(classtype_f) ~ NA_real_,
+      TRUE ~ 0
+    )
+  )
+
+
+#e)
+sum(!is.na(star$g4reading))
+
+sum(is.na(star$g4reading))
+
+sum(!is.na(star$g4math))
+
+sum(is.na(star$g4math))
+
+#2.2 Comparing Groups
+
+# a)
+means_reading <- star %>%
+  group_by(classtype) %>%
+  summarise(
+    mean_g4reading = mean(g4reading, na.rm = TRUE),
+  )
+
+means_reading
+
+#Small classes have the highest average score.
+
+# b)
+biv_reg <- lm(g4reading ~ small, data = star)
+summary(biv_reg)
+
+#Students in small classes garde about 3.1 points higher on average in fourth-grade reading than in regular classes.
+#This is not significant.
+
+#c)
+star_two <- star %>%
+  filter(classtype_f %in% c("Small", "Regular+Aide"))
+
+m_simple <- lm(g4reading ~ classtype_f, data = star_two)
+summary(m_simple)
+
+with(star_two,
+     mean(g4reading[classtype_f == "Small"], na.rm = TRUE) -
+       mean(g4reading[classtype_f == "Regular+Aide"], na.rm = TRUE))
+
+#d)
+star %>%
+  group_by(classtype_f) %>%
+  summarise(mean_g4math = mean(g4math, na.rm = TRUE))
+
+m_math <- lm(g4math ~ classtype_f, data = star)
+summary(m_math)
+
+#The pattern is similar which is class type appears to have really small effect on either reading or math scores.
+
+#2.3
+
+#a)
+m_controls <- lm(g4reading ~ small + race_f + yearssmall, data = star)
+summary(m_controls)
+
+#b)
+m_biv <- lm(g4reading ~ small, data = star)
+summary(m_biv)
+
+coef(m_biv)["small"]
+coef(m_controls)["small"]
+
+#Yes. Effect turns negative and changes by about 7 points.
+
+#c)
+#This coefficient represent the marginal effect of spending one additional year in a small class on reading scores.
+
+##2.4
+
+#a)
+m_interact <- lm(g4reading ~ small * race_f + yearssmall, data = star)
+summary(m_interact)
+
+#b) 
+tidy(m_interact)
+
+#c)
+coef(m_interact)["small"]
+
+coef(m_interact)["small"] +
+  coef(m_interact)["small:race_fBlack"]
+
+#d)
+#The interaction term is substantively meaningful. This effect of small classes varies by race.
+#W students show an estimated negative effect of about 5.3, whereas B students show a positive effect of about 1.6 .
+
+##2.5
+
+# a)
+models <- list(
+  "Bivariate"    = m_biv,
+  "With controls"= m_controls,
+  "Interaction"  = m_interact
+)
+
+vcovs <- list(
+  vcovHC(m_biv,      type = "HC1"),
+  vcovHC(m_controls, type = "HC1"),
+  vcovHC(m_interact, type = "HC1")
+)
+
+table <- modelsummary(
+  models,
+  vcov = vcovs,
+  stars = TRUE,
+  statistic = "({std.error})",
+  output = "gt"
+)
+
+table
+
+#b)
+plot <- modelplot(
+  models,
+  vcov = vcovs,
+  coef_omit = "Intercept"
+)
+
+plot
+
+#2.6
+#The data indicate that small class sizes do not have a strong effect on student achievement,
+#although the effect may vary on racial groups. For W students, estimated effect is negative, whereas for B students it is positive.
+#This evidence is more convincing than that of a typical observational study because STAR was a randomized experiment.
+#The overall explanatory power of the models is low and several subgroup estimates are imprecise.
