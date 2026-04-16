@@ -1,0 +1,203 @@
+#Cem
+#Assignment 9
+
+library(marginaleffects)
+library(ggplot2)
+library(survival)
+library(carData)
+library(MASS)
+library(nnet)
+library(pscl)
+library(AER)
+library(broom)
+
+#Part 1: In-Class
+
+data(BEPS)
+
+##1.1 Ordered logit
+
+#a)
+table(BEPS$economic.cond.national)
+BEPS$econ_ord = factor(BEPS$economic.cond.national, ordered = TRUE)
+
+#OLS treats the numerical values 1–5 as equally spaced, suggesting that the difference between 
+#got much worse and got a little worse is the same as the difference between stayed the same and got a little better.
+#The majority of respondents answered 2, 3, or 4, with 3 being the most selected category. The extremes (1 and 5) are by far the least selected categories. 
+#For Likert-type survey items, when psychological distances between neighboring categories need not be equal, this is most likely incorrect.
+
+#b)
+m_ologit = polr(econ_ord ~ age + gender + Europe + political.knowledge,
+                data = BEPS, Hess = TRUE)
+summary(m_ologit)
+
+#c)
+avg_slopes(m_ologit)
+
+#d)
+predictions(m_ologit, newdata = datagrid(gender = c("female", "male")))
+
+##1.2 Multinomial logit
+
+#a)
+BEPS$vote = relevel(BEPS$vote, ref = "Conservative")
+m_mlogit = multinom(vote ~ economic.cond.national + Blair + Hague +
+                      Kennedy + Europe, data = BEPS, trace = FALSE)
+summary(m_mlogit)
+
+#b)
+avg_slopes(m_mlogit)
+
+predictions(m_mlogit, by = "economic.cond.national")
+
+#If people have a negative assessment of the economy (1 or 2), they are 61.8% likely to vote for labor.
+
+#c)
+#Independence of Irrelevant Alternatives (IIA) is assumed by the multinomial logit:
+#The existence or characteristics of the third alternative (Liberal Democrats) have no bearing on the odds ratio between any two options (Labour, Conservative).
+#IIA fails in the red bus/blue bus comparison because the two options are almost perfect replacements, and eliminating one just transfers the probability to the other instead of dispersing it proportionately. 
+#IIA is a modest concern for British party choice:
+#Since the Liberal Democrats and Labor are both center-left parties with similar ideologies, some people could view them as partial replacements in a way that IIA cannot accept. 
+#However, the three-party menu is not as degenerate as two buses of different colors since the Conservatives hold a distinctly right-wing ideological perspective.
+#In general, IIA is a more reasonable concern for the Labor/Liberal Democrat divide, although it is conceivable for Conservatives compared to the others.
+
+#1.3 Poisson regression
+
+data(bioChemists)
+
+#a)
+summary(bioChemists$art)
+var(bioChemists$art)
+
+pdf("art_histogram.pdf", width = 6, height = 4)
+hist(bioChemists$art, breaks = 20, main = "Distribution of articles",
+     xlab = "Number of articles", col = "purple")
+dev.off()
+
+
+ggplot(bioChemists, aes(x = art)) +
+  geom_histogram(binwidth = 1, fill = "#9924a1", color = "yellow") +
+  theme_minimal() +
+  labs(title = "Publications in last 3 years of PhD",
+       x = "Number of articles", y = "Count")
+
+#The variance is around 3.71, while the mean is 1.69.
+
+#b)
+m_pois = glm(art ~ fem + mar + kid5 + phd + ment,
+             data = bioChemists, family = poisson)
+summary(m_pois)
+
+#c)
+dispersiontest(m_pois)
+
+#The dispersion is around 1.82, and the p-value is p<0.001.
+#Because the model underestimates uncertainty, inflates test statistics, and generates p-values that are deceptively tiny, the Poisson standard errors are too little.
+
+#1.4 Negative binomial regression
+
+#a)
+m_nb = glm.nb(art ~ fem + mar + kid5 + phd + ment,
+              data = bioChemists)
+summary(m_nb)
+
+#The Poisson estimate and the coefficient on ment are comparable. 
+#The primary distinction is in the standard errors: the negative binomial model yields more accurate and substantial estimates of uncertainty.
+
+#b)
+AIC(m_pois, m_nb)
+
+#AIC(m_pois): 3314.113
+#AIC(m_nb): 3135.917
+
+#c)
+
+predictions(m_nb, newdata = datagrid(fem = c("Men", "Women")))
+
+#2 Part 2: Take-Home
+
+lung <- survival::lung
+lung$dead <- lung$status - 1
+
+#2.1 Kaplan-Meier 
+
+#a)
+nrow(lung)
+sum(lung$dead == 1, na.rm = TRUE)
+sum(lung$dead == 0, na.rm = TRUE)
+sum(lung$dead == 0, na.rm = TRUE) / sum(lung$dead == 1, na.rm = TRUE)
+
+#The total observations is 228 and the number of deaths is 165.
+#The number of censored cases is 63, which is a about 38% of all, also looks like a relatively big part.
+
+#b)
+survfit(Surv(time, dead) ~ 1, data = lung)
+
+km_fit <- survfit(Surv(time, dead) ~ 1, data = lung)
+summary(km_fit)
+
+#310 days is the projected median survival time.
+#This indicates that 50% of the patients passed away within 310 days after enrollment, while the remaining 50% lived longer.
+
+#c)
+km_sex <- survfit(Surv(time, dead) ~ sex, data = lung)
+
+km_df <- tidy(km_sex)
+
+km_df$sex <- factor(km_df$strata,
+                    labels = c("Male", "Female"))
+
+p <- ggplot(km_df, aes(x = time, y = estimate, color = "brown", fill = sex)) +
+  geom_step(size = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = "purple") +
+  labs(
+    title = "Kaplan-Meier Survival Curves by Sex",
+    x = "Time (days)",
+    y = "Survival Probability",
+    color = "Sex",
+    fill = "Sex"
+  ) +
+  theme_minimal()
+
+print(p)
+
+ggsave("kmsurvivalbysex.pdf", plot = p, width = 8, height = 6)
+
+#The Kaplan-Maier curve colorly demonstrates that women are more likely to survive at any given moment and, as a result, live longer. 
+#Although the trend seems to be consistent, the confidence intervals do occasionally overlap.
+
+survdiff(Surv(time, dead) ~ sex, data = lung)
+
+#p=0.001 is the log-rank p-value.
+#The log-rank test assesses whether survival distributions vary over time between groups. 
+#A modest p-value indicates a substantial difference between the survival histories of males and females.
+
+#2.2 Cox model
+
+#a)
+cox_model <- coxph(Surv(time, dead) ~ age + sex + ph.ecog, data = lung)
+
+summary(cox_model)
+
+#The sex hazard ratio is 0.575. This indicates that the risk of mortality is approximately 42.5% lower for women than for men. 
+#The outcomes exhibit statistical significance. 
+
+#b)
+#Ph.ecog has a hazard ratio of 1.59. This indicates that the risk of dying increases by 59% for every unit rise in the ECOG performance level.
+
+#c)
+ph_test <- cox.zph(cox_model)
+
+ph_test
+
+#There is no evidence to refute the proportional hazards assumption, given all p-values are greater than 0.05. 
+#As a result, the impacts of sex, age, and ph.ecog are probably consistent across time.
+
+#d)
+#1 Male survival is significantly greater than female survival, according to the Kaplan-Meier analysis.
+#2Age is not a significant factor in the Cox model. Females are more likely to survive since the predictor sex is substantial and has a negative influence. 
+#Ph.ecog is likewise significant and has a positive impact, meaning that the hazard ratio rises in tandem with each increase in the ECOG performance score. 
+#3 The ph_test, which shows that no predictor has a p value less than 0.05, demonstrates that the proportional hazard assumption is true.
+#4 A person's sex has a major impact on their likelihood of surviving at a particular period. Males have a reduced chance of surviving.
+#The hazard ratio is also influenced by an individual's ECOG performance score.
+#The likelihood of survival is also reduced if an individual has a higher ECOG performance score.
